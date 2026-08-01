@@ -6,7 +6,7 @@ import asyncio
 from datetime import date, datetime
 
 # ================================================================
-#  GLOBAL STATE STORAGE (Bypasses session object errors completely)
+#  GLOBAL STATE STORAGE
 # ================================================================
 app_state = {
     "selected_date": None,
@@ -290,7 +290,7 @@ def home_view(page):
 
     main_content = ft.Column(
         controls=[
-            ft.Container(height=10),
+            ft.Container(height=25), # 🛠️ Safe notch clearance spacer for front camera/status bar
             summary_card,
             ft.Container(height=10), 
             dashboard_card("1", "Today's Attendance", f"View and take class records for {date.today().strftime('%b %d')}", ft.Icons.CALENDAR_MONTH, "/attendance", is_highlighted=True),
@@ -354,6 +354,7 @@ def attendance_view(page):
 
         content = ft.Column(
             controls=[
+                ft.Container(height=25), # 🛠️ Safe notch clearance spacer
                 banner(page, "Today's Attendance", show_back=True),
                 ft.Container(padding=20, content=ft.Column(spacing=10, controls=rows)),
             ]
@@ -424,6 +425,7 @@ def attendance_view(page):
 
     content = ft.Column(
         controls=[
+            ft.Container(height=25), # 🛠️ Safe notch clearance spacer
             banner(page, "Today's Attendance", show_back=True),
             ft.Container(padding=20, content=ft.Column(spacing=16, controls=[main_body, msg, submit_btn])),
         ]
@@ -452,7 +454,6 @@ def older_reports_view(page):
 
             def open_report(date_str=ds, disp=display):
                 def handler(e):
-                    # 🛠️ Fixed: Store inside safe global app_state dictionary directly
                     app_state["selected_date"] = date_str
                     app_state["selected_display"] = disp
                     page.go("/report_detail")
@@ -475,6 +476,7 @@ def older_reports_view(page):
         body = ft.Container(padding=20, content=ft.Column(spacing=12, controls=date_rows))
 
     content = ft.Column(controls=[
+        ft.Container(height=25), # 🛠️ Safe notch clearance spacer
         banner(page, "Older Records", show_back=True), 
         body
     ])
@@ -482,7 +484,6 @@ def older_reports_view(page):
 
 
 def report_detail_view(page):
-    # 🛠️ Fixed: Read cleanly from global app_state storage
     date_str = app_state.get("selected_date")
     display_date = app_state.get("selected_display")
     
@@ -519,6 +520,7 @@ def report_detail_view(page):
 
     content = ft.Column(
         controls=[
+            ft.Container(height=25), # 🛠️ Safe notch clearance spacer
             banner(page, f"📅 {display_date or 'Record'}", show_back=True),
             ft.Container(padding=20, content=ft.Column(spacing=10, controls=rows)),
         ]
@@ -609,6 +611,7 @@ def analytics_view(page):
 
     content = ft.Column(
         controls=[
+            ft.Container(height=25), # 🛠️ Safe notch clearance spacer
             banner(page, "Reports & Analytics", show_back=True),
             ft.Container(
                 padding=20,
@@ -682,6 +685,7 @@ def add_remove_view(page):
 
     content = ft.Column(
         controls=[
+            ft.Container(height=25), # 🛠️ Safe notch clearance spacer
             banner(page, "Manage Students", show_back=True),
             ft.Container(
                 padding=20,
