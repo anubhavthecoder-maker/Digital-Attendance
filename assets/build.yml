@@ -29,8 +29,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Flet
-        run: pip install flet
+      - name: Build APK
+        run: flet build apk --product "Digital Attendance"
 
       - name: Build APK
         run: flet build apk --module-name main --product "Digital Attendance"
