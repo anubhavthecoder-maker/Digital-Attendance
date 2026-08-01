@@ -6,6 +6,14 @@ import asyncio
 from datetime import date, datetime
 
 # ================================================================
+#  GLOBAL STATE STORAGE (Bypasses session object errors completely)
+# ================================================================
+app_state = {
+    "selected_date": None,
+    "selected_display": None
+}
+
+# ================================================================
 #  THE DATABASE & BACKUP SETUP
 # ================================================================
 
@@ -65,8 +73,6 @@ def add_student(name):
     conn.close()
 
 def remove_student(sid):
-    # 🛡️ SAFE DELETION FIX: We DO NOT delete past attendance anymore! 
-    # This ensures accidental student deletions never wipe historical stats.
     conn = sqlite3.connect(DB)
     c = conn.cursor()
     c.execute("DELETE FROM students WHERE id = ?", (sid,))
@@ -161,16 +167,16 @@ def banner(page, title, show_back=False):
             ft.IconButton(
                 icon=ft.Icons.ARROW_BACK,
                 icon_color=ft.Colors.WHITE,
-                on_click=lambda e: (page.views.pop(), page.update()),
+                on_click=lambda e: page.go("/"),
             )
         )
     controls.append(
-        ft.Text(title, size=20, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE)
+        ft.Text(title, size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE)
     )
     return ft.Container(
         content=ft.Row(controls=controls),
         bgcolor=APP_BG,
-        padding=16,  
+        padding=16,
         width=float("inf"),
     )
 
@@ -180,19 +186,6 @@ def banner(page, title, show_back=False):
 # ================================================================
 
 def home_view(page):
-
-    def go(route):
-        def handler(e):
-            if route == "/attendance":
-                page.views.append(attendance_view(page))
-            elif route == "/older_records":
-                page.views.append(older_reports_view(page))
-            elif route == "/add_remove":
-                page.views.append(add_remove_view(page))
-            elif route == "/analytics":
-                page.views.append(analytics_view(page))
-            page.update()
-        return handler
 
     def dashboard_card(number, title, subtitle, icon, route, is_highlighted=False):
         icon_color = GREEN_COLOR if title == "Today's Attendance" else ACCENT_GOLD
@@ -235,29 +228,22 @@ def home_view(page):
             bgcolor=ft.Colors.TRANSPARENT, 
             padding=1, 
             border_radius=12,
-            on_click=go(route),
+            on_click=lambda e: page.go(route),
         )
 
         def on_hover(e):
             if e.data == "true":
                 outer_card.bgcolor = ACCENT_GOLD 
                 inner_card.bgcolor = HOVER_BG
-                outer_card.shadow = ft.BoxShadow(
-                    blur_radius=15, 
-                    spread_radius=2, 
-                    color=ft.Colors.with_opacity(0.4, ACCENT_GOLD)
-                )
             else:
                 outer_card.bgcolor = ft.Colors.TRANSPARENT
                 inner_card.bgcolor = CARD_BG
-                outer_card.shadow = None
             outer_card.update()
             inner_card.update()
 
         outer_card.on_hover = on_hover
         return outer_card
 
-    # Fetch live stats for summary card
     report = get_attendance_for_date(today())
     total_students = len(get_all_students())
     
@@ -304,7 +290,7 @@ def home_view(page):
 
     main_content = ft.Column(
         controls=[
-            ft.Container(height=30), 
+            ft.Container(height=10),
             summary_card,
             ft.Container(height=10), 
             dashboard_card("1", "Today's Attendance", f"View and take class records for {date.today().strftime('%b %d')}", ft.Icons.CALENDAR_MONTH, "/attendance", is_highlighted=True),
@@ -315,7 +301,13 @@ def home_view(page):
         spacing=12,
     )
 
-    return ft.View(route="/", bgcolor=APP_BG, padding=20, controls=[main_content])
+    return ft.View(
+        route="/", 
+        bgcolor=APP_BG, 
+        padding=20, 
+        controls=[main_content],
+        scroll=ft.ScrollMode.AUTO
+    )
 
 
 # ================================================================
@@ -421,14 +413,7 @@ def attendance_view(page):
             return
 
         save_attendance([(d["id"], d["status"]) for d in attendance_data])
-        
-        # 🔄 IMMEDIATE VIEW UPDATE FIX: Replaces view instantly so summary updates right away!
-        page.views.pop()
-        page.views.append(attendance_view(page))
-        # Re-initialize home view in background stack so home summary refreshes immediately on back
-        if len(page.views) > 0:
-            page.views[0] = home_view(page)
-        page.update()
+        page.go("/")
 
     if not students:
         main_body = ft.Text("No students added yet!\nGo to 'Add / Remove Student' first.", color=TEXT_GREY, italic=True, text_align=ft.TextAlign.CENTER)
@@ -461,15 +446,16 @@ def older_reports_view(page):
             d_obj = datetime.strptime(ds, "%Y-%m-%d")
             display = d_obj.strftime("%d %b %Y")
             
-            # Fetch summary stats for this specific past date
             past_report = get_attendance_for_date(ds)
             p_count = sum(1 for _, s in past_report if s == "present")
             a_count = sum(1 for _, s in past_report if s == "absent")
 
             def open_report(date_str=ds, disp=display):
                 def handler(e):
-                    page.views.append(report_detail_view(page, date_str, disp))
-                    page.update()
+                    # 🛠️ Fixed: Store inside safe global app_state dictionary directly
+                    app_state["selected_date"] = date_str
+                    app_state["selected_display"] = disp
+                    page.go("/report_detail")
                 return handler
 
             date_rows.append(
@@ -495,8 +481,12 @@ def older_reports_view(page):
     return ft.View(route="/older_records", bgcolor=APP_BG, padding=0, controls=[content], scroll=ft.ScrollMode.AUTO)
 
 
-def report_detail_view(page, date_str, display_date):
-    report = get_attendance_for_date(date_str)
+def report_detail_view(page):
+    # 🛠️ Fixed: Read cleanly from global app_state storage
+    date_str = app_state.get("selected_date")
+    display_date = app_state.get("selected_display")
+    
+    report = get_attendance_for_date(date_str) if date_str else []
     present_count = sum(1 for _, s in report if s == "present")
     absent_count  = sum(1 for _, s in report if s == "absent")
 
@@ -529,7 +519,7 @@ def report_detail_view(page, date_str, display_date):
 
     content = ft.Column(
         controls=[
-            banner(page, f"📅 {display_date}", show_back=True),
+            banner(page, f"📅 {display_date or 'Record'}", show_back=True),
             ft.Container(padding=20, content=ft.Column(spacing=10, controls=rows)),
         ]
     )
@@ -537,11 +527,10 @@ def report_detail_view(page, date_str, display_date):
 
 
 # ================================================================
-#  SCREEN 4 — ANALYTICS (MONTH / YEAR TOGGLE)
+#  SCREEN 4 — ANALYTICS
 # ================================================================
 
 def analytics_view(page):
-    
     current_period = ["month"] 
     stats_column = ft.Column(spacing=10)
     info_text = ft.Text("", size=13, color=TEXT_GREY, italic=True)
@@ -557,7 +546,6 @@ def analytics_view(page):
             stats_column.controls.append(ft.Text(f"No attendance data recorded yet for this {period}.", color=TEXT_GREY))
         else:
             for name, pct, p_days, t_days in stats:
-                
                 if pct >= 75:
                     pct_color = GREEN_COLOR
                 elif pct <= 50:
@@ -608,7 +596,7 @@ def analytics_view(page):
             btn_month.color = APP_BG if period == "month" else ft.Colors.WHITE
             
             btn_year.bgcolor = ACCENT_GOLD if period == "year" else HOVER_BG
-            btn_year.color = APP_BG if period == "year" else ft.Colors.WHITE
+            btn_year.color = ft.Colors.WHITE if period == "year" else ft.Colors.WHITE
             
             refresh_stats()
         return handler
@@ -714,22 +702,19 @@ def add_remove_view(page):
 
 
 # ================================================================
-#  MAIN APP LOGIC & SPLASH SCREEN
+#  ROUTER & MAIN APP LOGIC
 # ================================================================
 
 async def main(page: ft.Page):
     setup_database()
     page.title = "Digital Attendance Pro"
     
-    # 📱 LOCKED DIMENSIONS 📱
     page.window.width = 400
     page.window.height = 750
     page.window.resizable = False
     page.window.maximizable = False
-    
     page.bgcolor = APP_BG 
 
-    # ── 1. Splash Screen ──────────────────────────
     logo = ft.Image(src="logo.png", width=220, height=90, fit="contain")
     spinner = ft.ProgressRing(color=ACCENT_GOLD)
     splash_text = ft.Text("Loading Digital Experience...", size=13, color=TEXT_GREY)
@@ -749,23 +734,47 @@ async def main(page: ft.Page):
         expand=True
     )
 
-    page.views.clear()
-    page.views.append(
-        ft.View(
-            route="/splash",
-            bgcolor=APP_BG,
-            padding=0,
-            controls=[splash_content] 
-        )
+    splash_view = ft.View(
+        route="/splash",
+        bgcolor=APP_BG,
+        padding=0,
+        controls=[splash_content]
     )
-    page.update()
 
-    # ── 2. The 5-Second Timer ─────────────────────────────────
+    def route_change(route):
+        page.views.clear()
+        if page.route == "/splash":
+            page.views.append(splash_view)
+        elif page.route == "/":
+            page.views.append(home_view(page))
+        elif page.route == "/attendance":
+            page.views.append(attendance_view(page))
+        elif page.route == "/older_records":
+            page.views.append(older_reports_view(page))
+        elif page.route == "/report_detail":
+            page.views.append(report_detail_view(page))
+        elif page.route == "/analytics":
+            page.views.append(analytics_view(page))
+        elif page.route == "/add_remove":
+            page.views.append(add_remove_view(page))
+        else:
+            page.views.append(home_view(page))
+        page.update()
+
+    def view_pop(view):
+        page.views.pop()
+        if len(page.views) > 0:
+            top_view = page.views[-1]
+            page.go(top_view.route)
+        else:
+            page.go("/")
+
+    page.on_route_change = route_change
+    page.on_view_pop = view_pop
+
+    page.go("/splash")
+
     await asyncio.sleep(5)
-
-    # ── 3. Transition to App Dashboard ────────────────────────
-    page.views.clear()
-    page.views.append(home_view(page))
-    page.update()
+    page.go("/")
 
 ft.app(target=main, assets_dir="assets")
