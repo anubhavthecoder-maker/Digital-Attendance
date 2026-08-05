@@ -33,7 +33,7 @@ jobs:
         run: pip install flet flet-geolocator
 
       - name: Build APK
-        run: flet build apk --product "Digital Attendance" --include-packages flet_geolocator
+        run: flet build apk --product "Digital Attendance" --permissions location
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
