@@ -30,10 +30,10 @@ jobs:
           python-version: '3.11'
 
       - name: Install Flet
-        run: pip install flet
+        run: pip install flet flet-geolocator
 
       - name: Build APK
-        run: flet build apk --product "Digital Attendance"
+        run: flet build apk --product "Digital Attendance" --include-packages flet_geolocator
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
