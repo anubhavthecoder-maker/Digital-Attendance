@@ -1,7 +1,9 @@
 import flet as ft
+import flet_geolocator as fg
 import sqlite3
 import os
 import shutil
+import math
 import asyncio
 from datetime import date, datetime
 
@@ -12,6 +14,30 @@ app_state = {
     "selected_date": None,
     "selected_display": None
 }
+
+# ================================================================
+#  GPS GEOFENCING (SCHOOL-ONLY ATTENDANCE)
+# ================================================================
+SCHOOL_LAT = 22.4680529
+SCHOOL_LON = 77.4797581
+RADIUS_KM = 0.025  # 25 meters — teacher must be on campus to mark attendance
+
+# Single shared Geolocator control instance; gets added to page.overlay in main()
+# (left at defaults on purpose — the exact settings/config class name has moved
+# around between flet-geolocator releases, so we avoid depending on it)
+geolocator = fg.Geolocator()
+
+
+def haversine_km(lat1, lon1, lat2, lon2):
+    r = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dphi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    )
+    return 2 * r * math.asin(math.sqrt(a))
 
 # ================================================================
 #  THE DATABASE & BACKUP SETUP
@@ -365,6 +391,80 @@ def attendance_view(page):
     cards_col = ft.Column(spacing=10)
     msg = ft.Text("", size=14)
 
+    # ---- GPS geofence gate: hidden until teacher verifies they're on campus ----
+    location_status = ft.Text("📍 Location not verified", size=13, color=TEXT_GREY)
+    body_wrapper = ft.Container(visible=False)
+
+    out_of_bounds_dialog = ft.AlertDialog(
+        modal=True,
+        bgcolor=CARD_BG,
+        title=ft.Text("⚠ Out of Campus", color=ACCENT_GOLD, size=18, weight=ft.FontWeight.BOLD),
+        content=ft.Text(
+            "You must be within 25 meters of the school campus to mark attendance. "
+            "Your current location is outside the permitted zone.",
+            color=TEXT_GREY,
+            size=13,
+        ),
+        actions=[
+            ft.ElevatedButton(
+                "Close App",
+                bgcolor=RED_COLOR,
+                color=ft.Colors.WHITE,
+                on_click=lambda e: page.window.close(),
+            )
+        ],
+        actions_alignment=ft.MainAxisAlignment.CENTER,
+    )
+
+    async def verify_location(e):
+        location_status.value = "Checking GPS..."
+        location_status.color = TEXT_GREY
+        page.update()
+        try:
+            await geolocator.request_permission()
+        except Exception:
+            pass
+        try:
+            pos = await geolocator.get_current_position()
+            lat, lon = pos.latitude, pos.longitude
+        except Exception as ex:
+            location_status.value = f"GPS error: {ex}"
+            location_status.color = RED_COLOR
+            page.update()
+            return
+
+        dist_km = haversine_km(lat, lon, SCHOOL_LAT, SCHOOL_LON)
+
+        if dist_km <= RADIUS_KM:
+            location_status.value = f"✅ Verified — {int(dist_km * 1000)}m from campus"
+            location_status.color = GREEN_COLOR
+            body_wrapper.visible = True
+            page.update()
+        else:
+            location_status.value = "❌ You are outside the campus zone."
+            location_status.color = RED_COLOR
+            page.update()
+            page.open(out_of_bounds_dialog)
+
+    verify_btn = ft.ElevatedButton(
+        "📍 Verify Location",
+        bgcolor=ACCENT_GOLD,
+        color=APP_BG,
+        on_click=verify_location,
+        width=float("inf"),
+    )
+
+    verify_card = ft.Container(
+        content=ft.Column(
+            controls=[verify_btn, ft.Container(height=6), location_status],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        bgcolor=CARD_BG,
+        border_radius=12,
+        padding=16,
+    )
+    # ---- end geofence gate ----
+
     def build_student_cards():
         cards_col.controls.clear()
         for entry in attendance_data:
@@ -418,16 +518,16 @@ def attendance_view(page):
 
     if not students:
         main_body = ft.Text("No students added yet!\nGo to 'Add / Remove Student' first.", color=TEXT_GREY, italic=True, text_align=ft.TextAlign.CENTER)
-        submit_btn = ft.Container()
+        body_wrapper.content = ft.Column(controls=[main_body])
     else:
-        main_body = cards_col
         submit_btn = ft.ElevatedButton("Submit Attendance", bgcolor=ACCENT_GOLD, color=APP_BG, on_click=submit, width=float("inf"))
+        body_wrapper.content = ft.Column(spacing=16, controls=[cards_col, msg, submit_btn])
 
     content = ft.Column(
         controls=[
             ft.Container(height=25), # 🛠️ Safe notch clearance spacer
             banner(page, "Today's Attendance", show_back=True),
-            ft.Container(padding=20, content=ft.Column(spacing=16, controls=[main_body, msg, submit_btn])),
+            ft.Container(padding=20, content=ft.Column(spacing=16, controls=[verify_card, body_wrapper])),
         ]
     )
     return ft.View(route="/attendance", bgcolor=APP_BG, padding=0, controls=[content], scroll=ft.ScrollMode.AUTO)
@@ -718,6 +818,8 @@ async def main(page: ft.Page):
     page.window.resizable = False
     page.window.maximizable = False
     page.bgcolor = APP_BG 
+
+    page.overlay.append(geolocator)  # register GPS control for the geofence check
 
     logo = ft.Image(src="logo.png", width=220, height=90, fit="contain")
     spinner = ft.ProgressRing(color=ACCENT_GOLD)
