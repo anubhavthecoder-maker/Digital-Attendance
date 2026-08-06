@@ -1,28 +1,16 @@
-name: Build Flet APK
+name: Build Android APK
 
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
+    branches: [ "main", "master" ]
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '17'
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -30,13 +18,13 @@ jobs:
           python-version: '3.11'
 
       - name: Install Flet
-        run: pip install flet flet-geolocator
+        run: pip install flet
 
       - name: Build APK
-        run: flet build apk --product "Digital Attendance" --permissions location
+        run: flet build apk
 
-      - name: Upload APK
+      - name: Upload APK File
         uses: actions/upload-artifact@v4
         with:
-          name: app-apk
-          path: build/apk/**/*.apk
+          name: Digital-Attendance-Pro-APK
+          path: build/apk/*.apk
