@@ -1,0 +1,33 @@
+=========================================
+      OFFICIAL SCHOOL ATTENDANCE REPORT   
+=========================================
+Generated on: 2026-08-11 18:08:16
+-----------------------------------------
+
+Date: 2026-08-11 | Time: 16:28:20 | Shift: Test Shift
+Student: EX3 (Roll: 3)
+Status: PRESENT
+----------------------------------------
+Date: 2026-08-11 | Time: 16:28:20 | Shift: Test Shift
+Student: EX4 (Roll: 4)
+Status: ABSENT
+----------------------------------------
+Date: 2026-08-11 | Time: 16:28:20 | Shift: Test Shift
+Student: EX5 (Roll: 5)
+Status: PRESENT
+----------------------------------------
+Date: 2026-08-11 | Time: 16:28:20 | Shift: Test Shift
+Student: EX6 (Roll: 6)
+Status: PRESENT
+----------------------------------------
+Date: 2026-08-11 | Time: 16:28:20 | Shift: Test Shift
+Student: EXample 1 (Roll: 1)
+Status: PRESENT
+----------------------------------------
+Date: 2026-08-11 | Time: 16:28:20 | Shift: Test Shift
+Student: Deleted Student [ID: 3] (Roll: N/A)
+Status: ABSENT
+----------------------------------------
+
+Report generated via Digital Attendance Pro
+Developed by Anubhav Yaduwanshi

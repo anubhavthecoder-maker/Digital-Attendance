@@ -5,7 +5,6 @@ import shutil
 import asyncio
 from datetime import date, datetime
 import datetime as dt
-from fpdf import FPDF
 
 # ================================================================
 #  GLOBAL STATE STORAGE & DYNAMIC THEME
@@ -97,13 +96,13 @@ def auto_backup_db():
 def today():
     return date.today().strftime("%Y-%m-%d")
 
-# --- Export to PDF Feature ---
+# --- Safe Mobile-Friendly Export Feature ---
 def export_all_to_pdf():
     if not os.path.exists(EXPORT_DIR):
         os.makedirs(EXPORT_DIR)
         
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = os.path.join(EXPORT_DIR, f"School_Attendance_Export_{timestamp}.pdf")
+    filename = os.path.join(EXPORT_DIR, f"School_Attendance_Report_{timestamp}.txt")
     
     conn = sqlite3.connect(DB)
     c = conn.cursor()
@@ -119,51 +118,23 @@ def export_all_to_pdf():
     rows = c.fetchall()
     conn.close()
     
-    pdf = FPDF()
-    pdf.add_page()
-    
-    # Main Header
-    pdf.set_font("Helvetica", size=16, style="B")
-    pdf.cell(0, 10, txt="Official School Attendance Report", ln=True, align='C')
-    pdf.set_font("Helvetica", size=10)
-    pdf.cell(0, 8, txt=f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align='C')
-    pdf.ln(5)
-    
-    # Table Headers
-    pdf.set_font("Helvetica", size=9, style="B")
-    pdf.cell(22, 8, "Date", border=1, align='C')
-    pdf.cell(18, 8, "Time", border=1, align='C')
-    pdf.cell(15, 8, "Shift", border=1, align='C')
-    pdf.cell(60, 8, "Student Name", border=1, align='C')
-    pdf.cell(20, 8, "Roll No", border=1, align='C')
-    pdf.cell(25, 8, "Status", border=1, align='C')
-    pdf.ln()
-    
-    # Table Rows
-    pdf.set_font("Helvetica", size=8)
-    for row in rows:
-        d, t, sh, n, r, st = row
-        pdf.cell(22, 8, str(d), border=1, align='C')
-        pdf.cell(18, 8, str(t), border=1, align='C')
-        pdf.cell(15, 8, str(sh), border=1, align='C')
-        pdf.cell(60, 8, str(n)[:25], border=1, align='L')
-        pdf.cell(20, 8, str(r), border=1, align='C')
-        pdf.cell(25, 8, str(st).capitalize(), border=1, align='C')
-        pdf.ln()
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write("=========================================\n")
+        f.write("      OFFICIAL SCHOOL ATTENDANCE REPORT   \n")
+        f.write("=========================================\n")
+        f.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write("-----------------------------------------\n\n")
         
-    # ==========================================
-    # NEW: The Signature / Watermark
-    # ==========================================
-    pdf.ln(10) # Adds a clean space after the table
-    pdf.set_text_color(0, 0, 0) # Black text
-    pdf.set_font("Helvetica", style="I", size=10)
-    pdf.cell(0, 6, "Report generated via Digital Attendance Pro", ln=True, align='C')
-    
-    pdf.set_text_color(130, 130, 130) # Subtle Gray watermark color
-    pdf.set_font("Helvetica", size=8)
-    pdf.cell(0, 5, "Developed by Anubhav Yaduwanshi", ln=True, align='C')
+        for row in rows:
+            d, t, sh, n, r, st = row
+            f.write(f"Date: {d} | Time: {t} | Shift: {sh}\n")
+            f.write(f"Student: {n} (Roll: {r})\n")
+            f.write(f"Status: {st.upper()}\n")
+            f.write("-" * 40 + "\n")
+            
+        f.write("\nReport generated via Digital Attendance Pro\n")
+        f.write("Developed by Anubhav Yaduwanshi\n")
         
-    pdf.output(filename)
     return filename
 
 # --- Time Shift Checking Logic ---
@@ -472,7 +443,7 @@ def home_view(page):
             ft.Container(height=10), 
             dashboard_card("1", "Today's Attendance", f"Take records for {date.today().strftime('%b %d')}", ft.Icons.CALENDAR_MONTH, "/attendance", is_highlighted=True), 
             dashboard_card("2", "Older Records", "Access past daily attendance data", ft.Icons.HISTORY, "/older_records"),
-            dashboard_card("3", "Reports & Analytics", "View Monthly/Yearly & Export to PDF", ft.Icons.PICTURE_AS_PDF, "/analytics"),
+            dashboard_card("3", "Reports & Analytics", "View Monthly/Yearly & Export Report", ft.Icons.DOWNLOAD, "/analytics"),
             dashboard_card("4", "Add/Remove Student", "Manage the student database", ft.Icons.PERSON_ADD_ALT_1, "/add_remove"),
             dashboard_card("5", "Manage Holidays", "Set school festivals and off-days", ft.Icons.EVENT, "/holidays"), 
             beta_credits_note
@@ -600,7 +571,6 @@ def manage_data_view(page):
 def attendance_view(page):
     c = get_colors()
     
-    # 1. Check for Weekends
     if datetime.today().weekday() == 6:
         content = ft.Column(controls=[
             ft.Container(height=25), banner(page, "Today's Attendance", show_back=True),
@@ -612,7 +582,6 @@ def attendance_view(page):
         ])
         return ft.View(route="/attendance", bgcolor=c["bg"], padding=0, controls=[content], scroll=ft.ScrollMode.AUTO)
 
-    # 2. Check for Holidays
     holiday_reason = get_holiday_reason(today())
     if holiday_reason:
         content = ft.Column(controls=[
@@ -626,7 +595,6 @@ def attendance_view(page):
         ])
         return ft.View(route="/attendance", bgcolor=c["bg"], padding=0, controls=[content], scroll=ft.ScrollMode.AUTO)
 
-    # 3. Check Shift Timing
     status_flag, derived_status, shift_name, shift_msg = check_shift_window()
     if status_flag == "closed":
         content = ft.Column(controls=[
@@ -639,7 +607,7 @@ def attendance_view(page):
         ])
         return ft.View(route="/attendance", bgcolor=c["bg"], padding=0, controls=[content], scroll=ft.ScrollMode.AUTO)
 
-    students = get_all_students() # Now returns (id, name, roll)
+    students = get_all_students()
     done_already = is_attendance_done_for_shift(shift_name)
 
     if done_already:
@@ -666,7 +634,7 @@ def attendance_view(page):
 
             def make_present(ent=entry):
                 def h(e):
-                    ent["status"] = derived_status # Automatically assigns "present" or "late" based on time
+                    ent["status"] = derived_status
                     build_student_cards()
                     page.update()
                 return h
@@ -844,7 +812,7 @@ def analytics_view(page):
     def trigger_export(e):
         try:
             filepath = export_all_to_pdf()
-            export_msg.value = f"✅ Success! PDF saved in: App Folder/{EXPORT_DIR}"
+            export_msg.value = f"✅ Success! Report saved in: App Folder/{EXPORT_DIR}"
         except Exception as err:
             export_msg.value = f"❌ Export failed: {err}"
             export_msg.color = c["red"]
@@ -919,7 +887,7 @@ def analytics_view(page):
     btn_month = ft.ElevatedButton("This Month", on_click=set_period("month"), bgcolor=c["accent"], color="#000000", expand=True)
     btn_year = ft.ElevatedButton("This Year", on_click=set_period("year"), bgcolor=c["hover"], color=c["text"], expand=True)
     
-    export_btn = ft.ElevatedButton("Export Data to PDF", icon=ft.Icons.PICTURE_AS_PDF, bgcolor="#2E7D32", color=ft.Colors.WHITE, width=float("inf"), on_click=trigger_export) 
+    export_btn = ft.ElevatedButton("Export Data Report", icon=ft.Icons.DOWNLOAD, bgcolor="#2E7D32", color=ft.Colors.WHITE, width=float("inf"), on_click=trigger_export) 
 
     toggle_row = ft.Row(controls=[btn_month, btn_year], spacing=10)
     refresh_stats()
@@ -1223,7 +1191,6 @@ async def main(page: ft.Page):
     page.on_route_change = route_change
     page.on_view_pop = view_pop
 
-    # Boot Sequence
     page.go("/splash")
     await asyncio.sleep(8.0) 
     page.go("/")

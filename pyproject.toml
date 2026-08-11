@@ -1,9 +1,41 @@
-[tool.flet.app]
-name = "Digital Attendance Pro"
-description = "School Attendance Management System"
-author = "Anubhav Yaduwanshi"
-
-[tool.flet.dependencies]
-dependencies = [
-    "fpdf2"
-]
+# --- Safe Mobile-Friendly Export Feature ---
+def export_all_to_pdf():
+    if not os.path.exists(EXPORT_DIR):
+        os.makedirs(EXPORT_DIR)
+        
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # We export as a clean .txt report that opens on any phone instantly
+    filename = os.path.join(EXPORT_DIR, f"School_Attendance_Report_{timestamp}.txt")
+    
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("""
+        SELECT attendance.date, attendance.time, attendance.shift,
+               COALESCE(students.name, 'Deleted Student [ID: ' || attendance.student_id || ']'), 
+               COALESCE(students.roll_no, 'N/A'),
+               attendance.status
+        FROM attendance
+        LEFT JOIN students ON attendance.student_id = students.id
+        ORDER BY attendance.date DESC, attendance.time DESC
+    """)
+    rows = c.fetchall()
+    conn.close()
+    
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write("=========================================\n")
+        f.write("      OFFICIAL SCHOOL ATTENDANCE REPORT   \n")
+        f.write("=========================================\n")
+        f.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write("-----------------------------------------\n\n")
+        
+        for row in rows:
+            d, t, sh, n, r, st = row
+            f.write(f"Date: {d} | Time: {t} | Shift: {sh}\n")
+            f.write(f"Student: {n} (Roll: {r})\n")
+            f.write(f"Status: {st.upper()}\n")
+            f.write("-" * 40 + "\n")
+            
+        f.write("\nReport generated via Digital Attendance Pro\n")
+        f.write("Developed by Anubhav Yaduwanshi\n")
+        
+    return filename
