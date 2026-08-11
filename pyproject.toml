@@ -1,17 +1,9 @@
-[project]
-name = "digital-attendance-pro"
-version = "1.0.0"
-description = "Digital Attendance Pro"
-requires-python = ">=3.10"
+[tool.flet.app]
+name = "Digital Attendance Pro"
+description = "School Attendance Management System"
+author = "Anubhav Yaduwanshi"
+
+[tool.flet.dependencies]
 dependencies = [
-    "flet",
-    "flet-geolocator",
+    "fpdf2"
 ]
-
-[tool.flet]
-org = "com.example"
-product = "Digital Attendance Pro"
-
-[tool.flet.android.permission]
-"android.permission.ACCESS_FINE_LOCATION" = true
-"android.permission.ACCESS_COARSE_LOCATION" = true
