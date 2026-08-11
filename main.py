@@ -3,8 +3,9 @@ import sqlite3
 import os
 import shutil
 import asyncio
-import csv
 from datetime import date, datetime
+import datetime as dt
+from fpdf import FPDF
 
 # ================================================================
 #  GLOBAL STATE STORAGE & DYNAMIC THEME
@@ -55,7 +56,8 @@ def setup_database():
     c.execute("""
         CREATE TABLE IF NOT EXISTS students (
             id   INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL
+            name TEXT NOT NULL,
+            roll_no TEXT NOT NULL UNIQUE
         )
     """)
     c.execute("""
@@ -63,7 +65,10 @@ def setup_database():
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             student_id INTEGER NOT NULL,
             date       TEXT NOT NULL,
-            status     TEXT NOT NULL
+            time       TEXT NOT NULL,
+            shift      TEXT NOT NULL,
+            status     TEXT NOT NULL,
+            FOREIGN KEY (student_id) REFERENCES students (id)
         )
     """)
     c.execute("""
@@ -92,32 +97,86 @@ def auto_backup_db():
 def today():
     return date.today().strftime("%Y-%m-%d")
 
-# --- Export to Excel Feature ---
-def export_all_to_csv():
+# --- Export to PDF Feature ---
+def export_all_to_pdf():
     if not os.path.exists(EXPORT_DIR):
         os.makedirs(EXPORT_DIR)
         
-    filename = os.path.join(EXPORT_DIR, f"School_Attendance_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = os.path.join(EXPORT_DIR, f"School_Attendance_Export_{timestamp}.pdf")
     
     conn = sqlite3.connect(DB)
     c = conn.cursor()
     c.execute("""
-        SELECT attendance.date, 
+        SELECT attendance.date, attendance.time, attendance.shift,
                COALESCE(students.name, 'Deleted Student [ID: ' || attendance.student_id || ']'), 
+               COALESCE(students.roll_no, 'N/A'),
                attendance.status
         FROM attendance
         LEFT JOIN students ON attendance.student_id = students.id
-        ORDER BY attendance.date DESC, students.name
+        ORDER BY attendance.date DESC, attendance.time DESC
     """)
     rows = c.fetchall()
     conn.close()
     
-    with open(filename, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(["Date", "Student Name", "Status"])
-        writer.writerows(rows)
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Main Header
+    pdf.set_font("Helvetica", size=16, style="B")
+    pdf.cell(0, 10, txt="Official School Attendance Report", ln=True, align='C')
+    pdf.set_font("Helvetica", size=10)
+    pdf.cell(0, 8, txt=f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align='C')
+    pdf.ln(5)
+    
+    # Table Headers
+    pdf.set_font("Helvetica", size=9, style="B")
+    pdf.cell(22, 8, "Date", border=1, align='C')
+    pdf.cell(18, 8, "Time", border=1, align='C')
+    pdf.cell(15, 8, "Shift", border=1, align='C')
+    pdf.cell(60, 8, "Student Name", border=1, align='C')
+    pdf.cell(20, 8, "Roll No", border=1, align='C')
+    pdf.cell(25, 8, "Status", border=1, align='C')
+    pdf.ln()
+    
+    # Table Rows
+    pdf.set_font("Helvetica", size=8)
+    for row in rows:
+        d, t, sh, n, r, st = row
+        pdf.cell(22, 8, str(d), border=1, align='C')
+        pdf.cell(18, 8, str(t), border=1, align='C')
+        pdf.cell(15, 8, str(sh), border=1, align='C')
+        pdf.cell(60, 8, str(n)[:25], border=1, align='L')
+        pdf.cell(20, 8, str(r), border=1, align='C')
+        pdf.cell(25, 8, str(st).capitalize(), border=1, align='C')
+        pdf.ln()
         
+    # ==========================================
+    # NEW: The Signature / Watermark
+    # ==========================================
+    pdf.ln(10) # Adds a clean space after the table
+    pdf.set_text_color(0, 0, 0) # Black text
+    pdf.set_font("Helvetica", style="I", size=10)
+    pdf.cell(0, 6, "Report generated via Digital Attendance Pro", ln=True, align='C')
+    
+    pdf.set_text_color(130, 130, 130) # Subtle Gray watermark color
+    pdf.set_font("Helvetica", size=8)
+    pdf.cell(0, 5, "Developed by Anubhav Yaduwanshi", ln=True, align='C')
+        
+    pdf.output(filename)
     return filename
+
+# --- Time Shift Checking Logic ---
+def check_shift_window():
+    now = datetime.now().time()
+    s1_start = dt.time(8, 0); s1_on_time = dt.time(8, 30); s1_end = dt.time(8, 40)
+    s2_start = dt.time(12, 15); s2_on_time = dt.time(12, 45); s2_end = dt.time(12, 55)
+
+    if s1_start <= now <= s1_on_time: return "open", "present", "Shift 1", "Shift 1: Active (On Time)"
+    elif s1_on_time < now <= s1_end: return "open", "late", "Shift 1", "Shift 1: Active (Late Buffer)"
+    elif s2_start <= now <= s2_on_time: return "open", "present", "Shift 2", "Shift 2: Active (On Time)"
+    elif s2_on_time < now <= s2_end: return "open", "late", "Shift 2", "Shift 2: Active (Late Buffer)"
+    else: return "closed", None, None, "Closed. Shifts: 8:00-8:40 AM | 12:15-12:55 PM"
 
 # --- Holiday Functions ---
 def get_all_holidays():
@@ -154,15 +213,15 @@ def get_holiday_reason(h_date):
 def get_all_students():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    c.execute("SELECT id, name FROM students ORDER BY name")
+    c.execute("SELECT id, name, roll_no FROM students ORDER BY name")
     rows = c.fetchall()
     conn.close()
     return rows
 
-def add_student(name):
+def add_student(name, roll_no):
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    c.execute("INSERT INTO students (name) VALUES (?)", (name,))
+    c.execute("INSERT INTO students (name, roll_no) VALUES (?, ?)", (name, roll_no))
     conn.commit()
     conn.close()
 
@@ -173,21 +232,22 @@ def remove_student(sid):
     conn.commit()
     conn.close()
 
-def is_attendance_done_today():
+def is_attendance_done_for_shift(shift):
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM attendance WHERE date = ?", (today(),))
+    c.execute("SELECT COUNT(*) FROM attendance WHERE date = ? AND shift = ?", (today(), shift))
     count = c.fetchone()[0]
     conn.close()
     return count > 0
 
-def save_attendance(records):
+def save_attendance(records, shift):
     conn = sqlite3.connect(DB)
     c = conn.cursor()
+    now_time = datetime.now().strftime("%H:%M:%S")
     for sid, status in records:
         c.execute(
-            "INSERT INTO attendance (student_id, date, status) VALUES (?, ?, ?)",
-            (sid, today(), status)
+            "INSERT INTO attendance (student_id, date, time, shift, status) VALUES (?, ?, ?, ?, ?)",
+            (sid, today(), now_time, shift, status)
         )
     conn.commit()
     conn.close()
@@ -233,7 +293,7 @@ def get_analytics_stats(period="month"):
         c.execute("SELECT id, name FROM students ORDER BY name")
         students = c.fetchall()
         for sid, name in students:
-            c.execute("SELECT COUNT(*) FROM attendance WHERE student_id = ? AND date LIKE ? AND status = 'present'", (sid, f"{prefix}%"))
+            c.execute("SELECT COUNT(*) FROM attendance WHERE student_id = ? AND date LIKE ? AND (status = 'present' OR status = 'late')", (sid, f"{prefix}%"))
             present_days = c.fetchone()[0]
             pct = int((present_days / total_days) * 100)
             stats.append((name, pct, present_days, total_days))
@@ -339,11 +399,11 @@ def home_view(page):
     report = get_attendance_for_date(today())
     total_students = len(get_all_students())
     
-    if total_students > 0 and is_attendance_done_today():
-        present_count = sum(1 for _, s in report if s == "present")
+    if total_students > 0 and len(report) > 0:
+        present_count = sum(1 for _, s in report if s in ["present", "late"])
         absent_count = sum(1 for _, s in report if s == "absent")
-        p_pct = int((present_count / total_students) * 100)
-        a_pct = int((absent_count / total_students) * 100)
+        p_pct = int((present_count / total_students) * 100) if total_students else 0
+        a_pct = int((absent_count / total_students) * 100) if total_students else 0
     else:
         present_count, absent_count, p_pct, a_pct = 0, 0, 0, 0
 
@@ -367,7 +427,7 @@ def home_view(page):
                 ft.Container(height=5),
                 ft.Row(
                     controls=[
-                        ft.Row([ft.Container(width=10, height=10, border_radius=5, bgcolor=c["accent"]), ft.Text(f"Present: {present_count} ({p_pct}%)", size=13, color=c["text_muted"])]),
+                        ft.Row([ft.Container(width=10, height=10, border_radius=5, bgcolor=c["accent"]), ft.Text(f"Present/Late: {present_count} ({p_pct}%)", size=13, color=c["text_muted"])]),
                         ft.Row([ft.Container(width=10, height=10, border_radius=5, bgcolor=c["hover"]), ft.Text(f"Absent: {absent_count} ({a_pct}%)", size=13, color=c["text_muted"])]),
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN
@@ -412,7 +472,7 @@ def home_view(page):
             ft.Container(height=10), 
             dashboard_card("1", "Today's Attendance", f"Take records for {date.today().strftime('%b %d')}", ft.Icons.CALENDAR_MONTH, "/attendance", is_highlighted=True), 
             dashboard_card("2", "Older Records", "Access past daily attendance data", ft.Icons.HISTORY, "/older_records"),
-            dashboard_card("3", "Reports & Analytics", "View Monthly/Yearly & Export to Excel", ft.Icons.INSERT_CHART, "/analytics"),
+            dashboard_card("3", "Reports & Analytics", "View Monthly/Yearly & Export to PDF", ft.Icons.PICTURE_AS_PDF, "/analytics"),
             dashboard_card("4", "Add/Remove Student", "Manage the student database", ft.Icons.PERSON_ADD_ALT_1, "/add_remove"),
             dashboard_card("5", "Manage Holidays", "Set school festivals and off-days", ft.Icons.EVENT, "/holidays"), 
             beta_credits_note
@@ -474,8 +534,6 @@ def settings_view(page):
     )
     return ft.View(route="/settings", bgcolor=c["bg"], padding=0, controls=[content], scroll=ft.ScrollMode.AUTO)
 
-# 🛠️ FIXED: Removed the buggy Flet Popup box entirely. 
-# Data now deletes instantly when the trash can is clicked, just like the students!
 def manage_data_view(page):
     c = get_colors()
     month_list = ft.Column(spacing=10)
@@ -542,17 +600,19 @@ def manage_data_view(page):
 def attendance_view(page):
     c = get_colors()
     
+    # 1. Check for Weekends
     if datetime.today().weekday() == 6:
         content = ft.Column(controls=[
             ft.Container(height=25), banner(page, "Today's Attendance", show_back=True),
             ft.Container(padding=20, content=ft.Column([
                 ft.Icon(ft.Icons.WEEKEND, color=c["accent"], size=50), 
                 ft.Text("It's Sunday!", size=24, weight=ft.FontWeight.BOLD, color=c["text"]),
-                ft.Text("This is an automatic holiday. No attendance is required today. Enjoy your day off!", color=c["text_muted"], text_align=ft.TextAlign.CENTER)
+                ft.Text("This is an automatic holiday. No attendance is required today.", color=c["text_muted"], text_align=ft.TextAlign.CENTER)
             ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, alignment=ft.MainAxisAlignment.CENTER))
         ])
         return ft.View(route="/attendance", bgcolor=c["bg"], padding=0, controls=[content], scroll=ft.ScrollMode.AUTO)
 
+    # 2. Check for Holidays
     holiday_reason = get_holiday_reason(today())
     if holiday_reason:
         content = ft.Column(controls=[
@@ -566,65 +626,47 @@ def attendance_view(page):
         ])
         return ft.View(route="/attendance", bgcolor=c["bg"], padding=0, controls=[content], scroll=ft.ScrollMode.AUTO)
 
-    students = get_all_students()
-    done_already = is_attendance_done_today()
-
-    if done_already:
-        report = get_attendance_for_date(today())
-        present_count = sum(1 for _, s in report if s == "present")
-        absent_count  = sum(1 for _, s in report if s == "absent")
-
-        rows = [
-            ft.Container(
-                content=ft.Row(
-                    controls=[
-                        ft.Text(f"✅ Present: {present_count}", size=16, weight=ft.FontWeight.BOLD, color=c["green"]),
-                        ft.Text(f"❌ Absent: {absent_count}", size=16, weight=ft.FontWeight.BOLD, color=c["red"]),
-                    ],
-                    alignment=ft.MainAxisAlignment.SPACE_AROUND,
-                ),
-                bgcolor=c["card"], border_radius=12, padding=16,
-            ),
-            ft.Divider(color=c["hover"]),
-        ]
-
-        for i, (name, status) in enumerate(report):
-            icon  = ft.Icons.CHECK_CIRCLE if status == "present" else ft.Icons.CANCEL
-            iclr  = c["green"] if status == "present" else c["red"]
-            rows.append(
-                ft.Container(
-                    content=ft.Row(controls=[
-                        ft.Text(str(i+1), size=13, color=c["text_muted"], width=30),
-                        ft.Icon(icon, color=iclr, size=18),
-                        ft.Text(name, size=15, color=c["text"], expand=True),
-                        ft.Text(status.capitalize(), color=iclr, weight=ft.FontWeight.BOLD),
-                    ]),
-                    bgcolor=c["card"], border_radius=10, padding=12,  
-                )
-            )
-
-        content = ft.Column(
-            controls=[
-                ft.Container(height=25),
-                banner(page, "Today's Attendance", show_back=True),
-                ft.Container(padding=20, content=ft.Column(spacing=10, controls=rows)),
-            ]
-        )
+    # 3. Check Shift Timing
+    status_flag, derived_status, shift_name, shift_msg = check_shift_window()
+    if status_flag == "closed":
+        content = ft.Column(controls=[
+            ft.Container(height=25), banner(page, "Today's Attendance", show_back=True),
+            ft.Container(padding=20, content=ft.Column([
+                ft.Icon(ft.Icons.LOCK_CLOCK, color=c["red"], size=50), 
+                ft.Text("Portal Closed", size=24, weight=ft.FontWeight.BOLD, color=c["text"]),
+                ft.Text(shift_msg, color=c["text_muted"], text_align=ft.TextAlign.CENTER)
+            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, alignment=ft.MainAxisAlignment.CENTER))
+        ])
         return ft.View(route="/attendance", bgcolor=c["bg"], padding=0, controls=[content], scroll=ft.ScrollMode.AUTO)
 
-    attendance_data = [{"id": sid, "name": sname, "status": None} for sid, sname in students]
+    students = get_all_students() # Now returns (id, name, roll)
+    done_already = is_attendance_done_for_shift(shift_name)
+
+    if done_already:
+        content = ft.Column(controls=[
+            ft.Container(height=25), banner(page, "Today's Attendance", show_back=True),
+            ft.Container(padding=20, content=ft.Column([
+                ft.Icon(ft.Icons.CHECK_CIRCLE, color=c["green"], size=50), 
+                ft.Text("Already Submitted", size=24, weight=ft.FontWeight.BOLD, color=c["text"]),
+                ft.Text(f"Attendance for {shift_name} is already complete.", color=c["text_muted"], text_align=ft.TextAlign.CENTER)
+            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, alignment=ft.MainAxisAlignment.CENTER))
+        ])
+        return ft.View(route="/attendance", bgcolor=c["bg"], padding=0, controls=[content], scroll=ft.ScrollMode.AUTO)
+
+    attendance_data = [{"id": sid, "name": sname, "roll": sroll, "status": None} for sid, sname, sroll in students]
     cards_col = ft.Column(spacing=10)
-    msg = ft.Text("", size=14)
+    msg = ft.Text(shift_msg, size=14, color=c["accent"], weight=ft.FontWeight.BOLD)
+    error_msg = ft.Text("", size=14)
 
     def build_student_cards():
         cards_col.controls.clear()
         for entry in attendance_data:
-            is_p = entry["status"] == "present"
+            is_marked = entry["status"] is not None
             is_a = entry["status"] == "absent"
 
             def make_present(ent=entry):
                 def h(e):
-                    ent["status"] = "present"
+                    ent["status"] = derived_status # Automatically assigns "present" or "late" based on time
                     build_student_cards()
                     page.update()
                 return h
@@ -636,15 +678,22 @@ def attendance_view(page):
                     page.update()
                 return h
 
+            btn_text = derived_status.capitalize() if derived_status else "Present"
+            
             cards_col.controls.append(
                 ft.Container(
                     content=ft.Column(
                         spacing=12,
                         controls=[
-                            ft.Text(entry['name'], size=16, color=c["text"], weight=ft.FontWeight.W_500),
                             ft.Row(
                                 controls=[
-                                    ft.ElevatedButton("Present", bgcolor="#388E3C" if is_p else c["hover"], color=ft.Colors.WHITE if is_p else c["text"], on_click=make_present(), expand=True),
+                                    ft.Text(entry['name'], size=16, color=c["text"], weight=ft.FontWeight.W_500),
+                                    ft.Text(f"Roll: {entry['roll']}", size=12, color=c["text_muted"]),
+                                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                            ),
+                            ft.Row(
+                                controls=[
+                                    ft.ElevatedButton(btn_text, bgcolor="#388E3C" if (is_marked and not is_a) else c["hover"], color=ft.Colors.WHITE if (is_marked and not is_a) else c["text"], on_click=make_present(), expand=True),
                                     ft.ElevatedButton("Absent", bgcolor="#D32F2F" if is_a else c["hover"], color=ft.Colors.WHITE if is_a else c["text"], on_click=make_absent(), expand=True),
                                 ],
                             ),
@@ -659,12 +708,12 @@ def attendance_view(page):
     def submit(e):
         unmarked = [d["name"] for d in attendance_data if d["status"] is None]
         if unmarked:
-            msg.value = f"⚠ Mark all students first! ({len(unmarked)} remaining)"
-            msg.color = c["red"]
+            error_msg.value = f"⚠ Mark all students first! ({len(unmarked)} remaining)"
+            error_msg.color = c["red"]
             page.update()
             return
 
-        save_attendance([(d["id"], d["status"]) for d in attendance_data])
+        save_attendance([(d["id"], d["status"]) for d in attendance_data], shift_name)
         page.go("/")
 
     if not students:
@@ -678,7 +727,7 @@ def attendance_view(page):
         controls=[
             ft.Container(height=25), 
             banner(page, "Today's Attendance", show_back=True),
-            ft.Container(padding=20, content=ft.Column(spacing=16, controls=[main_body, msg, submit_btn])),
+            ft.Container(padding=20, content=ft.Column(spacing=16, controls=[msg, main_body, error_msg, submit_btn])),
         ]
     )
     return ft.View(route="/attendance", bgcolor=c["bg"], padding=0, controls=[content], scroll=ft.ScrollMode.AUTO)
@@ -701,7 +750,7 @@ def older_reports_view(page):
             display = d_obj.strftime("%d %b %Y")
             
             past_report = get_attendance_for_date(ds)
-            p_count = sum(1 for _, s in past_report if s == "present")
+            p_count = sum(1 for _, s in past_report if s in ["present", "late"])
             a_count = sum(1 for _, s in past_report if s == "absent")
 
             def open_report(date_str=ds, disp=display):
@@ -717,7 +766,7 @@ def older_reports_view(page):
                         ft.Icon(ft.Icons.CALENDAR_TODAY, color=c["accent"], size=20),
                         ft.Column([
                             ft.Text(display, size=15, color=c["text"], weight=ft.FontWeight.BOLD),
-                            ft.Text(f"✅ {p_count} Present  |  ❌ {a_count} Absent", size=11, color=c["text_muted"]),
+                            ft.Text(f"✅ {p_count} Present/Late  |  ❌ {a_count} Absent", size=11, color=c["text_muted"]),
                         ], expand=True, spacing=2),
                         ft.Icon(ft.Icons.CHEVRON_RIGHT, size=20, color=c["text_muted"]),
                     ]),
@@ -741,15 +790,15 @@ def report_detail_view(page):
     display_date = app_state.get("selected_display")
     
     report = get_attendance_for_date(date_str) if date_str else []
-    present_count = sum(1 for _, s in report if s == "present")
+    present_count = sum(1 for _, s in report if s in ["present", "late"])
     absent_count  = sum(1 for _, s in report if s == "absent")
 
     rows = [
         ft.Container(
             content=ft.Row(
                 controls=[
-                    ft.Text(f"✅ Present: {present_count}", size=16, weight=ft.FontWeight.BOLD, color=c["green"]),
-                    ft.Text(f"❌ Absent: {absent_count}", size=16, weight=ft.FontWeight.BOLD, color=c["red"]),
+                    ft.Text(f"✅ Present/Late: {present_count}", size=14, weight=ft.FontWeight.BOLD, color=c["green"]),
+                    ft.Text(f"❌ Absent: {absent_count}", size=14, weight=ft.FontWeight.BOLD, color=c["red"]),
                 ],
                 alignment=ft.MainAxisAlignment.SPACE_AROUND,
             ),
@@ -759,7 +808,7 @@ def report_detail_view(page):
     ]
     
     for i, (name, status) in enumerate(report):
-        iclr = c["green"] if status == "present" else c["red"]
+        iclr = c["green"] if status in ["present", "late"] else c["red"]
         rows.append(
             ft.Container(
                 content=ft.Row(controls=[
@@ -794,8 +843,8 @@ def analytics_view(page):
 
     def trigger_export(e):
         try:
-            filepath = export_all_to_csv()
-            export_msg.value = f"✅ Success! File saved in: App Folder/{EXPORT_DIR}"
+            filepath = export_all_to_pdf()
+            export_msg.value = f"✅ Success! PDF saved in: App Folder/{EXPORT_DIR}"
         except Exception as err:
             export_msg.value = f"❌ Export failed: {err}"
             export_msg.color = c["red"]
@@ -842,7 +891,7 @@ def analytics_view(page):
                                     ],
                                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                                 ),
-                                ft.Text(f"Present {p_days} out of {t_days} days", size=11, color=c["text_muted"]),
+                                ft.Text(f"Present/Late {p_days} out of {t_days} shifts", size=11, color=c["text_muted"]),
                                 ft.Container(height=2),
                                 mini_bar
                             ],
@@ -870,7 +919,7 @@ def analytics_view(page):
     btn_month = ft.ElevatedButton("This Month", on_click=set_period("month"), bgcolor=c["accent"], color="#000000", expand=True)
     btn_year = ft.ElevatedButton("This Year", on_click=set_period("year"), bgcolor=c["hover"], color=c["text"], expand=True)
     
-    export_btn = ft.ElevatedButton("Export All Data to Excel (CSV)", icon=ft.Icons.DOWNLOAD, bgcolor="#2E7D32", color=ft.Colors.WHITE, width=float("inf"), on_click=trigger_export) 
+    export_btn = ft.ElevatedButton("Export Data to PDF", icon=ft.Icons.PICTURE_AS_PDF, bgcolor="#2E7D32", color=ft.Colors.WHITE, width=float("inf"), on_click=trigger_export) 
 
     toggle_row = ft.Row(controls=[btn_month, btn_year], spacing=10)
     refresh_stats()
@@ -915,10 +964,17 @@ def add_remove_view(page):
         bgcolor=c["card"],
         color=c["text"]
     )
+    roll_input = ft.TextField(
+        hint_text="Roll No...",
+        width=100, 
+        border_radius=10, 
+        bgcolor=c["card"],
+        color=c["text"]
+    )
 
     def refresh():
         student_list.controls.clear()
-        for sid, sname in get_all_students():
+        for sid, sname, sroll in get_all_students():
             def make_remove(s=sid):
                 def h(e):
                     remove_student(s)
@@ -931,7 +987,10 @@ def add_remove_view(page):
                 ft.Container(
                     content=ft.Row(controls=[
                         ft.Icon(ft.Icons.PERSON, color=c["text_muted"], size=20),
-                        ft.Text(sname, color=c["text"], expand=True, size=15),
+                        ft.Column([
+                            ft.Text(sname, color=c["text"], size=15),
+                            ft.Text(f"Roll: {sroll}", color=c["text_muted"], size=11),
+                        ], expand=True, spacing=2),
                         ft.IconButton(icon=ft.Icons.DELETE_OUTLINE, icon_color=c["red"], on_click=make_remove()), 
                     ]),
                     bgcolor=c["card"], border_radius=10, padding=12,  
@@ -942,15 +1001,21 @@ def add_remove_view(page):
 
     def add(e):
         name = name_input.value.strip()
-        if not name:
-            msg.value = "Please enter a valid name."
+        roll = roll_input.value.strip()
+        if not name or not roll:
+            msg.value = "Please enter both name and roll no."
             msg.color = c["red"]
         else:
-            add_student(name)
-            name_input.value = ""
-            msg.value = f"Added '{name}' successfully!"
-            msg.color = c["green"]
-            refresh()
+            try:
+                add_student(name, roll)
+                name_input.value = ""
+                roll_input.value = ""
+                msg.value = f"Added '{name}' successfully!"
+                msg.color = c["green"]
+                refresh()
+            except sqlite3.IntegrityError:
+                msg.value = "Error: Roll No already exists!"
+                msg.color = c["red"]
         page.update()
 
     content = ft.Column(
@@ -962,7 +1027,8 @@ def add_remove_view(page):
                 content=ft.Column(
                     spacing=16,
                     controls=[
-                        ft.Row(controls=[name_input, ft.ElevatedButton("Add", bgcolor=c["accent"], color="#000000", on_click=add)]),
+                        ft.Row(controls=[name_input, roll_input]),
+                        ft.ElevatedButton("Add Student", bgcolor=c["accent"], color="#000000", on_click=add, width=float("inf")),
                         msg,
                         ft.Divider(color=c["hover"]),
                         ft.Text("Existing Students:", size=15, weight=ft.FontWeight.BOLD, color=c["text_muted"]),
@@ -1124,7 +1190,6 @@ async def main(page: ft.Page):
             else:
                 new_view = home_view(page)
 
-            # ✨ THE SAFE SWAP 
             if new_view:
                 page.views.append(new_view)
             
@@ -1163,4 +1228,5 @@ async def main(page: ft.Page):
     await asyncio.sleep(8.0) 
     page.go("/")
 
-ft.app(target=main, assets_dir="assets")
+if __name__ == "__main__":
+    ft.app(target=main, assets_dir="assets")
