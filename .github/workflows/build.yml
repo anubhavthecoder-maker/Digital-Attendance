@@ -21,10 +21,10 @@ jobs:
         run: pip install flet
 
       - name: Build APK
-        run: flet build apk --yes
+        run: flet build apk --project digital_attendance --product "Digital Attendance" --yes
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Digital Attendance
+          name: DigitalAttendance
           path: build/apk/**/*.apk
